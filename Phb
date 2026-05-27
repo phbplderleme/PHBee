@@ -1,0 +1,153 @@
+#!/bin/bash
+
+# Renk tanımlamaları
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Menü fonksiyonu
+show_menu() {
+    clear
+    echo -e "${BLUE}=================================${NC}"
+    echo -e "${GREEN}   Pufferpanel Kurulum Menüsü${NC}"
+    echo -e "${BLUE}=================================${NC}"
+    echo -e "${YELLOW}1)${NC} Systemctl ile Kurulum"
+    echo -e "${YELLOW}2)${NC} Docker ile Kurulum"
+    echo -e "${YELLOW}3)${NC} Çıkış"
+    echo -e "${BLUE}=================================${NC}"
+    echo -n "Seçiminiz: "
+}
+
+# Systemctl kurulumu
+install_systemctl() {
+    echo -e "${GREEN}[+] Pufferpanel Systemctl kurulumu başlatılıyor...${NC}"
+    
+    # Root kontrolü
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}[-] Bu kurulum root yetkisi gerektirir!${NC}"
+        echo -e "${YELLOW}[!] Lütfen 'sudo' ile çalıştırın veya root olarak giriş yapın.${NC}"
+        return 1
+    fi
+    
+    # Sistem güncelleme
+    echo -e "${BLUE}[*] Sistem paketleri güncelleniyor...${NC}"
+    apt update && apt upgrade -y
+    
+    # Node.js kurulumu
+    echo -e "${BLUE}[*] Node.js kuruluyor...${NC}"
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt install -y nodejs
+    
+    # Pufferpanel kurulumu
+    echo -e "${BLUE}[*] Pufferpanel kuruluyor...${NC}"
+    npm install -g pufferpanel@2
+    
+    # Servis oluşturma
+    echo -e "${BLUE}[*] Systemctl servisi oluşturuluyor...${NC}"
+    pufferpanel user add --email admin@example.com --name admin --password admin123 --admin
+    pufferpanel systemd
+    
+    # Servisi başlatma
+    systemctl enable pufferpanel
+    systemctl start pufferpanel
+    
+    echo -e "${GREEN}[✓] Pufferpanel Systemctl kurulumu tamamlandı!${NC}"
+    echo -e "${GREEN}[✓] Panel adresi: http://$(curl -s ifconfig.me):8080${NC}"
+    echo -e "${YELLOW}[!] Varsayılan giriş bilgileri:${NC}"
+    echo -e "    Email: admin@example.com"
+    echo -e "    Şifre: admin123"
+}
+
+# Docker kurulumu
+install_docker() {
+    echo -e "${GREEN}[+] Pufferpanel Docker kurulumu başlatılıyor...${NC}"
+    
+    # Docker kontrolü
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}[!] Docker bulunamadı, kuruluyor...${NC}"
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+    fi
+    
+    if ! command -v docker-compose &> /dev/null; then
+        echo -e "${YELLOW}[!] Docker Compose kuruluyor...${NC}"
+        apt install -y docker-compose
+    fi
+    
+    # Pufferpanel için dizin oluşturma
+    mkdir -p /opt/pufferpanel
+    cd /opt/pufferpanel
+    
+    # Docker Compose dosyası oluşturma
+    cat > docker-compose.yml << 'EOF'
+version: '3.8'
+
+services:
+  pufferpanel:
+    image: ghcr.io/pufferpanel/pufferpanel:latest
+    container_name: pufferpanel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/etc/pufferpanel
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - PUFFER_PANEL_PASSWORD=admin123
+    networks:
+      - puffer-network
+
+networks:
+  puffer-network:
+    driver: bridge
+EOF
+    
+    # Konteyner başlatma
+    echo -e "${BLUE}[*] Pufferpanel Docker konteyneri başlatılıyor...${NC}"
+    docker-compose up -d
+    
+    # Admin kullanıcı oluşturma
+    sleep 5
+    echo -e "${BLUE}[*] Admin kullanıcı oluşturuluyor...${NC}"
+    docker exec -it pufferpanel pufferpanel user add --email admin@example.com --name admin --password admin123 --admin
+    
+    echo -e "${GREEN}[✓] Pufferpanel Docker kurulumu tamamlandı!${NC}"
+    echo -e "${GREEN}[✓] Panel adresi: http://$(curl -s ifconfig.me):8080${NC}"
+    echo -e "${YELLOW}[!] Varsayılan giriş bilgileri:${NC}"
+    echo -e "    Email: admin@example.com"
+    echo -e "    Şifre: admin123"
+    echo -e "${YELLOW}[!] Docker komutları:${NC}"
+    echo -e "    Başlat: docker-compose start"
+    echo -e "    Durdur: docker-compose stop"
+    echo -e "    Loglar: docker-compose logs"
+}
+
+# Ana program
+while true; do
+    show_menu
+    read choice
+    
+    case $choice in
+        1)
+            install_systemctl
+            ;;
+        2)
+            install_docker
+            ;;
+        3)
+            echo -e "${GREEN}[✓] Çıkış yapılıyor...${NC}"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}[-] Geçersiz seçim! Lütfen 1-3 arasında bir sayı girin.${NC}"
+            sleep 2
+            ;;
+    esac
+    
+    echo
+    echo -e "${YELLOW}[?] Ana menüye dönmek için Enter tuşuna basın...${NC}"
+    read
+done
