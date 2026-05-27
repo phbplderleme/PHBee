@@ -1,0 +1,330 @@
+#!/bin/bash
+
+# Renk tanımlamaları
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Proje dizini
+PROJECT_DIR="/root/oversee-fixed"
+PID_FILE="/tmp/oversee.pid"
+
+# Red Wiston animasyonu
+show_red_wiston() {
+    clear
+    
+    echo -e "${RED}"
+    echo "██████╗ ███████╗██████╗     ██╗    ██╗██╗███████╗████████╗ ██████╗ ███╗   ██╗"
+    sleep 0.2
+    echo "██╔══██╗██╔════╝██╔══██╗    ██║    ██║██║██╔════╝╚══██╔══╝██╔═══██╗████╗  ██║"
+    sleep 0.2
+    echo "██████╔╝█████╗  ██║  ██║    ██║ █╗ ██║██║███████╗   ██║   ██║   ██║██╔██╗ ██║"
+    sleep 0.2
+    echo "██╔══██╗██╔══╝  ██║  ██║    ██║███╗██║██║╚════██║   ██║   ██║   ██║██║╚██╗██║"
+    sleep 0.2
+    echo "██║  ██║███████╗██████╔╝    ╚███╔███╔╝██║███████║   ██║   ╚██████╔╝██║ ╚████║"
+    sleep 0.2
+    echo "╚═╝  ╚═╝╚══════╝╚═════╝      ╚══╝╚══╝ ╚═╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝"
+    echo -e "${NC}"
+    
+    sleep 0.5
+    
+    echo -e "${RED}${BOLD}"
+    for i in {1..3}; do
+        echo -n "⚡ !!! RED WISTON !!! ⚡"
+        sleep 0.3
+        echo -ne "\r\033[K"
+        sleep 0.2
+    done
+    echo -e "⚡ !!! RED WISTON !!! ⚡${NC}"
+    
+    sleep 0.5
+    
+    echo -ne "${CYAN}"
+    for i in {1..60}; do
+        echo -ne "█"
+        sleep 0.05
+    done
+    echo -e "${NC}\n"
+}
+
+# Yükleme animasyonu
+loading_spinner() {
+    local spinstr='|/-\'
+    echo -ne "${YELLOW}"
+    for i in {1..20}; do
+        local temp=${spinstr#?}
+        printf " [%c]  Yükleniyor..." "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep 0.1
+        printf "\r\033[K"
+    done
+    echo -e "${GREEN}✓ Tamamlandı!${NC}"
+}
+
+# Servis durumunu kontrol et
+check_status() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Overseefixed çalışıyor (PID: $PID)${NC}"
+            return 0
+        else
+            echo -e "${RED}❌ Overseefixed durdurulmuş (PID dosyası var ama çalışmıyor)${NC}"
+            rm -f "$PID_FILE"
+            return 1
+        fi
+    else
+        echo -e "${RED}❌ Overseefixed çalışmıyor${NC}"
+        return 1
+    fi
+}
+
+# Kurulum
+install_oversee() {
+    clear
+    echo -e "${BLUE}[+] Overseefixed kurulumu başlatılıyor...${NC}\n"
+    
+    # Root kontrolü
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}[-] Root yetkisi gerekli!${NC}"
+        return 1
+    fi
+    
+    # Node.js kurulumu
+    echo -e "${BLUE}[*] Node.js kuruluyor...${NC}"
+    curl -sL https://deb.nodesource.com/setup_20.x | sudo bash -
+    apt-get install nodejs -y
+    
+    # Git clone
+    echo -e "${BLUE}[*] Proje klonlanıyor...${NC}"
+    git clone https://github.com/draco-labes/oversee-fixed.git
+    
+    cd "$PROJECT_DIR" || return 1
+    
+    # NPM kurulumu
+    echo -e "${BLUE}[*] NPM paketleri kuruluyor...${NC}"
+    npm install
+    
+    # Seed ve kullanıcı oluşturma
+    echo -e "${BLUE}[*] Veritabanı seed ediliyor...${NC}"
+    npm run seed
+    
+    echo -e "${BLUE}[*] Kullanıcı oluşturuluyor...${NC}"
+    npm run createUser
+    
+    echo -e "${GREEN}✓ Kurulum tamamlandı!${NC}"
+    sleep 2
+}
+
+# Servisi başlat
+start_oversee() {
+    clear
+    echo -e "${BLUE}[+] Overseefixed başlatılıyor...${NC}\n"
+    
+    cd "$PROJECT_DIR" || return 1
+    
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo -e "${YELLOW}⚠️ Zaten çalışıyor (PID: $PID)${NC}"
+            return 1
+        fi
+    fi
+    
+    # Arka planda başlat
+    nohup node . > /tmp/oversee.log 2>&1 &
+    echo $! > "$PID_FILE"
+    
+    sleep 2
+    check_status
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}🌐 http://localhost:3000 adresinden erişebilirsiniz${NC}"
+    fi
+}
+
+# Servisi durdur
+stop_oversee() {
+    clear
+    echo -e "${RED}[+] Overseefixed durduruluyor...${NC}\n"
+    
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            kill "$PID"
+            sleep 2
+            echo -e "${GREEN}✅ Servis durduruldu${NC}"
+        else
+            echo -e "${YELLOW}⚠️ Servis zaten çalışmıyor${NC}"
+        fi
+        rm -f "$PID_FILE"
+    else
+        echo -e "${YELLOW}⚠️ Servis çalışmıyor${NC}"
+    fi
+    
+    sleep 1
+}
+
+# Servisi yeniden başlat
+restart_oversee() {
+    echo -e "${BLUE}[+] Overseefixed yeniden başlatılıyor...${NC}\n"
+    stop_oversee
+    sleep 1
+    start_oversee
+}
+
+# Admin ekle
+add_admin() {
+    clear
+    echo -e "${BLUE}[+] Yeni admin ekleme${NC}\n"
+    
+    cd "$PROJECT_DIR" || return 1
+    
+    # Servis çalışıyor mu kontrol et
+    check_status
+    
+    echo -e "${YELLOW}[!] Yeni admin bilgilerini girin:${NC}"
+    
+    read -p "Email: " ADMIN_EMAIL
+    read -s -p "Şifre: " ADMIN_PASS
+    echo
+    read -p "Kullanıcı adı: " ADMIN_USER
+    
+    if [ -z "$ADMIN_EMAIL" ] || [ -z "$ADMIN_PASS" ] || [ -z "$ADMIN_USER" ]; then
+        echo -e "${RED}❌ Tüm alanlar zorunlu!${NC}"
+        return 1
+    fi
+    
+    # Node script ile admin ekle (npm run createUser zaten var)
+    echo -e "${BLUE}[*] Admin ekleniyor...${NC}"
+    node -e "
+        const { PrismaClient } = require('@prisma/client');
+        const bcrypt = require('bcrypt');
+        const prisma = new PrismaClient();
+        
+        async function addAdmin() {
+            const hashedPassword = await bcrypt.hash('$ADMIN_PASS', 10);
+            const user = await prisma.user.create({
+                data: {
+                    email: '$ADMIN_EMAIL',
+                    password: hashedPassword,
+                    username: '$ADMIN_USER',
+                    role: 'ADMIN'
+                }
+            });
+            console.log('✅ Admin oluşturuldu:', user.email);
+            await prisma.\$disconnect();
+        }
+        addAdmin().catch(console.error);
+    "
+    
+    echo -e "${GREEN}✅ Admin başarıyla eklendi!${NC}"
+    sleep 2
+}
+
+# Logları göster
+show_logs() {
+    clear
+    echo -e "${BLUE}[+] Son 20 satır log${NC}\n"
+    
+    if [ -f "/tmp/oversee.log" ]; then
+        tail -20 /tmp/oversee.log
+    else
+        echo -e "${YELLOW}⚠️ Log dosyası bulunamadı${NC}"
+    fi
+    
+    echo -e "\n${YELLOW}[Enter] tuşuna basın...${NC}"
+    read
+}
+
+# Ana menü
+main_menu() {
+    clear
+    echo -e "${RED}${BOLD}"
+    echo "  ██████╗ ███████╗██████╗     ██╗    ██╗██╗███████╗████████╗ ██████╗ ███╗   ██╗"
+    echo "  ██╔══██╗██╔════╝██╔══██╗    ██║    ██║██║██╔════╝╚══██╔══╝██╔═══██╗████╗  ██║"
+    echo "  ██████╔╝█████╗  ██║  ██║    ██║ █╗ ██║██║███████╗   ██║   ██║   ██║██╔██╗ ██║"
+    echo "  ██╔══██╗██╔══╝  ██║  ██║    ██║███╗██║██║╚════██║   ██║   ██║   ██║██║╚██╗██║"
+    echo "  ██║  ██║███████╗██████╔╝    ╚███╔███╔╝██║███████║   ██║   ╚██████╔╝██║ ╚████║"
+    echo "  ╚═╝  ╚═╝╚══════╝╚═════╝      ╚══╝╚══╝ ╚═╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝"
+    echo -e "${NC}"
+    echo -e "${RED}${BOLD}              ⚡ HOŞ GELDİNİZ RED WISTON ⚡${NC}\n"
+    
+    # Durum göster
+    echo -e "${YELLOW}════════════════════════════════════════${NC}"
+    echo -n "📊 Servis Durumu: "
+    check_status
+    echo -e "${YELLOW}════════════════════════════════════════${NC}\n"
+    
+    echo -e "${GREEN} 1)${CYAN} Kurulum (oversee-fixed)${NC}"
+    echo -e "${GREEN} 2)${CYAN} Başlat${NC}"
+    echo -e "${GREEN} 3)${RED} Durdur${NC}"
+    echo -e "${GREEN} 4)${BLUE} Yeniden Başlat${NC}"
+    echo -e "${GREEN} 5)${PURPLE} Yeni Admin Ekle${NC}"
+    echo -e "${GREEN} 6)${YELLOW} Logları Göster${NC}"
+    echo -e "${RED} 7) Çıkış${NC}"
+    echo -e "${YELLOW}════════════════════════════════════════${NC}"
+    echo -ne "${PURPLE}➜ Seçiminiz: ${NC}"
+}
+
+# Ana program
+main() {
+    show_red_wiston
+    
+    echo -e "${BLUE}RED WISTON başlatılıyor...${NC}"
+    loading_spinner
+    
+    echo -e "\n${GREEN}${BOLD}✨ RED WISTON'a Hoş Geldiniz! ✨${NC}"
+    sleep 1
+    
+    while true; do
+        main_menu
+        read choice
+        
+        case $choice in
+            1)
+                install_oversee
+                ;;
+            2)
+                start_oversee
+                ;;
+            3)
+                stop_oversee
+                ;;
+            4)
+                restart_oversee
+                ;;
+            5)
+                add_admin
+                ;;
+            6)
+                show_logs
+                ;;
+            7)
+                echo -e "\n${RED}❌ RED WISTON'dan çıkılıyor...${NC}"
+                sleep 1
+                clear
+                exit 0
+                ;;
+            *)
+                echo -e "\n${RED}❌ Geçersiz seçim!${NC}"
+                sleep 1
+                ;;
+        esac
+        
+        if [[ $choice != 7 ]] && [[ $choice != 6 ]]; then
+            echo -e "\n${YELLOW}[Enter] tuşuna basarak devam edin...${NC}"
+            read
+        fi
+    done
+}
+
+# Scripti başlat
+main
